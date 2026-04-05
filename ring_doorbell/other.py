@@ -28,6 +28,10 @@ from ring_doorbell.const import (
 )
 from ring_doorbell.exceptions import RingError
 from ring_doorbell.generic import RingGeneric
+from ring_doorbell.webrtcstream import (
+    RingWebRtcMessageCallback,
+    RingWebRtcStream,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +46,7 @@ class RingOther(RingGeneric):
         """Initialise the other devices."""
         super().__init__(ring, device_api_id)
         self.shared = shared
+        self._webrtc_streams: dict[str, RingWebRtcStream] = {}
 
     @property
     def family(self) -> str:
@@ -75,6 +80,10 @@ class RingOther(RingGeneric):
             RingCapability.DING,
         ]:
             return self.kind in INTERCOM_KINDS
+
+        if capability == RingCapability.VIDEO:
+            return self.kind == "intercom_handset_video"
+
         return False
 
     @property
@@ -270,6 +279,52 @@ class RingOther(RingGeneric):
             return True
 
         return False
+
+    async def generate_async_webrtc_stream(
+        self,
+        sdp_offer: str,
+        session_id: str,
+        on_message_callback: RingWebRtcMessageCallback,
+        *,
+        keep_alive_timeout: int | None = 60 * 5,
+    ) -> None:
+        """Generate the rtc stream."""
+
+        async def _close_callback() -> None:
+            await self.close_webrtc_stream(session_id)
+
+        stream = RingWebRtcStream(
+            self._ring,
+            self.device_api_id,
+            on_message_callback=on_message_callback,
+            keep_alive_timeout=keep_alive_timeout,
+            on_close_callback=_close_callback,
+        )
+        self._webrtc_streams[session_id] = stream
+        await stream.generate(sdp_offer)
+
+    async def on_webrtc_candidate(
+        self, session_id: str, candidate: str, multi_line_index: int
+    ) -> None:
+        """Send an ICE candidate."""
+        if stream := self._webrtc_streams.get(session_id):
+            await stream.on_ice_candidate(candidate, multi_line_index)
+        else:
+            msg = "Ice candidate received before stream has been created."
+            raise RingError(msg)
+
+    async def close_webrtc_stream(self, session_id: str) -> None:
+        """Close the rtc stream."""
+        stream = self._webrtc_streams.pop(session_id, None)
+        if stream:
+            await stream.close()
+
+    def sync_close_webrtc_stream(self, session_id: str) -> None:
+        """Close the rtc stream."""
+        stream = self._webrtc_streams.pop(session_id, None)
+        if stream:
+            stream.sync_close()
+
 
     DEPRECATED_API_QUERIES: ClassVar = {
         *RingGeneric.DEPRECATED_API_QUERIES,
