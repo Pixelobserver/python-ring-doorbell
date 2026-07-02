@@ -3,12 +3,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 import uuid
+import aiofiles
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from ring_doorbell.const import (
+    SNAPSHOT_ENDPOINT,
+    SNAPSHOT_TIMESTAMP_ENDPOINT,
     DOORBELLS_ENDPOINT,
     HEALTH_DOORBELL_ENDPOINT,
     INTERCOM_ALLOWED_USERS,
@@ -114,6 +119,34 @@ class RingOther(RingGeneric):
         if self.kind in INTERCOM_KINDS and (features := self._attrs.get("features")):
             return features.get("show_recordings", False)
         return False
+
+async def async_get_snapshot(
+        self, retries: int = 3, delay: int = 1, filename: str | None = None
+    ) -> bytes | None:
+        """Take a snapshot and download it."""
+        payload = {"doorbot_ids": [self._attrs.get("id")]}
+        await self._ring.async_query(
+            SNAPSHOT_TIMESTAMP_ENDPOINT, method="POST", json=payload
+        )
+        request_time = time.time()
+        for _ in range(retries):
+            await asyncio.sleep(delay)
+            resp = await self._ring.async_query(
+                SNAPSHOT_TIMESTAMP_ENDPOINT, method="POST", json=payload
+            )
+            response = resp.json()
+            if response["timestamps"][0]["timestamp"] / 1000 > request_time:
+                resp = await self._ring.async_query(
+                    SNAPSHOT_ENDPOINT.format(self._attrs.get("id"))
+                )
+                snapshot = resp.content
+                if filename:
+                    async with aiofiles.open(filename, "wb") as jpg:
+                        await jpg.write(snapshot)
+                    return None
+                return snapshot
+
+        return None
 
     @property
     def unlock_duration(self) -> str | None:
