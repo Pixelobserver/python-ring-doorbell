@@ -142,3 +142,13 @@ async def test_other_open_door(ring, aioresponses_mock, mocker):
         method="PUT",
         **kwargs,
     )
+
+async def test_intercom_video_webrtc_support(ring):
+    dev = ring.devices()["other"][0]
+    dev._attrs["kind"] = "intercom_handset_video"
+
+    assert dev.has_capability("video") is True
+    assert hasattr(dev, "generate_async_webrtc_stream")
+    assert hasattr(dev, "on_webrtc_candidate")
+    assert hasattr(dev, "close_webrtc_stream")
+    assert hasattr(dev, "sync_close_webrtc_stream")
