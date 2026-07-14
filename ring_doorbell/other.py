@@ -120,7 +120,7 @@ class RingOther(RingGeneric):
             return features.get("show_recordings", False)
         return False
 
-async def async_get_snapshot(
+    async def async_get_snapshot(
         self, retries: int = 3, delay: int = 1, filename: str | None = None
     ) -> bytes | None:
         """Take a snapshot and download it."""
@@ -135,7 +135,12 @@ async def async_get_snapshot(
                 SNAPSHOT_TIMESTAMP_ENDPOINT, method="POST", json=payload
             )
             response = resp.json()
-            if response["timestamps"][0]["timestamp"] / 1000 > request_time:
+            timestamps = response.get("timestamps") or []
+            if not timestamps:
+                continue
+
+            timestamp = timestamps[0].get("timestamp")
+            if timestamp is not None and timestamp / 1000 > request_time:
                 resp = await self._ring.async_query(
                     SNAPSHOT_ENDPOINT.format(self._attrs.get("id"))
                 )

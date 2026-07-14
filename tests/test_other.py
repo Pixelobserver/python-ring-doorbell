@@ -1,5 +1,7 @@
 """The tests for the Ring platform."""
 
+from unittest.mock import AsyncMock, MagicMock
+
 from .conftest import json_request_kwargs, nojson_request_kwargs
 
 
@@ -143,7 +145,9 @@ async def test_other_open_door(ring, aioresponses_mock, mocker):
         **kwargs,
     )
 
+
 async def test_intercom_video_webrtc_support(ring):
+    """Test WebRTC methods and video capability for a video intercom."""
     dev = ring.devices()["other"][0]
     dev._attrs["kind"] = "intercom_handset_video"
 
@@ -152,3 +156,19 @@ async def test_intercom_video_webrtc_support(ring):
     assert hasattr(dev, "on_webrtc_candidate")
     assert hasattr(dev, "close_webrtc_stream")
     assert hasattr(dev, "sync_close_webrtc_stream")
+
+
+async def test_intercom_snapshot_handles_empty_timestamps(ring, mocker):
+    """Test an empty Ring timestamp response does not raise an exception."""
+    dev = ring.devices()["other"][0]
+    empty_response = MagicMock()
+    empty_response.json.return_value = {"timestamps": []}
+    query = mocker.patch.object(
+        dev._ring,
+        "async_query",
+        new=AsyncMock(return_value=empty_response),
+    )
+    mocker.patch("ring_doorbell.other.asyncio.sleep", new=AsyncMock())
+
+    assert await dev.async_get_snapshot(retries=2, delay=0) is None
+    assert query.await_count == 3
