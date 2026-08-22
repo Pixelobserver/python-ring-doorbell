@@ -146,16 +146,51 @@ async def test_other_open_door(ring, aioresponses_mock, mocker):
     )
 
 
-async def test_intercom_video_webrtc_support(ring):
-    """Test WebRTC methods and video capability for a video intercom."""
+async def test_intercom_video_webrtc_lifecycle(ring, mocker):
+    """Test creating, updating, and closing a video intercom WebRTC stream."""
     dev = ring.devices()["other"][0]
     dev._attrs["kind"] = "intercom_handset_video"
+    callback = AsyncMock()
+    stream = MagicMock()
+    stream.generate = AsyncMock()
+    stream.on_ice_candidate = AsyncMock()
+    stream.close = AsyncMock()
+    stream_type = mocker.patch(
+        "ring_doorbell.other.RingWebRtcStream", return_value=stream
+    )
 
     assert dev.has_capability("video") is True
-    assert hasattr(dev, "generate_async_webrtc_stream")
-    assert hasattr(dev, "on_webrtc_candidate")
-    assert hasattr(dev, "close_webrtc_stream")
-    assert hasattr(dev, "sync_close_webrtc_stream")
+
+    await dev.generate_async_webrtc_stream("offer", "session", callback)
+    stream_type.assert_called_once_with(
+        dev._ring,
+        dev.device_api_id,
+        on_message_callback=callback,
+        keep_alive_timeout=300,
+        on_close_callback=mocker.ANY,
+    )
+    stream.generate.assert_awaited_once_with("offer")
+
+    await dev.on_webrtc_candidate("session", "candidate", 2)
+    stream.on_ice_candidate.assert_awaited_once_with("candidate", 2)
+
+    await dev.close_webrtc_stream("session")
+    stream.close.assert_awaited_once_with()
+    assert "session" not in dev._webrtc_streams
+
+
+async def test_intercom_video_webrtc_sync_close(ring, mocker):
+    """Test synchronously closing a video intercom WebRTC stream."""
+    dev = ring.devices()["other"][0]
+    stream = MagicMock()
+    stream.generate = AsyncMock()
+    mocker.patch("ring_doorbell.other.RingWebRtcStream", return_value=stream)
+
+    await dev.generate_async_webrtc_stream("offer", "session", AsyncMock())
+    dev.sync_close_webrtc_stream("session")
+
+    stream.sync_close.assert_called_once_with()
+    assert "session" not in dev._webrtc_streams
 
 
 async def test_intercom_snapshot_handles_empty_timestamps(ring, mocker):

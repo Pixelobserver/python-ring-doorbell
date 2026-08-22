@@ -8,12 +8,11 @@ import json
 import logging
 import time
 import uuid
-import aiofiles
 from typing import TYPE_CHECKING, Any, ClassVar
 
+import aiofiles
+
 from ring_doorbell.const import (
-    SNAPSHOT_ENDPOINT,
-    SNAPSHOT_TIMESTAMP_ENDPOINT,
     DOORBELLS_ENDPOINT,
     HEALTH_DOORBELL_ENDPOINT,
     INTERCOM_ALLOWED_USERS,
@@ -27,6 +26,8 @@ from ring_doorbell.const import (
     OTHER_DOORBELL_VOL_MAX,
     OTHER_DOORBELL_VOL_MIN,
     SETTINGS_ENDPOINT,
+    SNAPSHOT_ENDPOINT,
+    SNAPSHOT_TIMESTAMP_ENDPOINT,
     VOICE_VOL_MAX,
     VOICE_VOL_MIN,
     RingCapability,
@@ -362,7 +363,6 @@ class RingOther(RingGeneric):
         stream = self._webrtc_streams.pop(session_id, None)
         if stream:
             stream.sync_close()
-
 
     DEPRECATED_API_QUERIES: ClassVar = {
         *RingGeneric.DEPRECATED_API_QUERIES,

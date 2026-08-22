@@ -233,20 +233,11 @@ class Ring:
             else all_devices[api_id_to_idx[device_api_id]]
         )
 
-    def video_devices(self) -> Sequence[RingDoorBell | RingOther]:
-        """Get all video-capable devices."""
+    def video_devices(self) -> Sequence[RingDoorBell]:
+        """Get all devices."""
         devices = self.devices()
         return list(
-            chain(
-                devices.doorbots,
-                devices.authorized_doorbots,
-                devices.stickup_cams,
-                (
-                    device
-                    for device in devices.other
-                    if device.has_capability("video")
-                ),
-            )
+            chain(devices.doorbots, devices.authorized_doorbots, devices.stickup_cams)
         )
 
     def groups(self) -> Mapping[str, RingLightGroup]:
@@ -416,14 +407,9 @@ class RingDevices:
         return list(self._all_devices.values())
 
     @property
-    def video_devices(self) -> Sequence[RingDoorBell | RingOther]:
-        """The video devices, i.e. doorbells, stickup cams, and video intercoms."""
-        return [
-            *self._doorbots,
-            *self._authorized_doorbots,
-            *self._stickup_cams,
-            *(device for device in self._other if device.has_capability("video")),
-        ]
+    def video_devices(self) -> Sequence[RingDoorBell]:
+        """The video devices, i.e. doorbells and stickup_cams."""
+        return [*self._doorbots, *self._authorized_doorbots, *self._stickup_cams]
 
     def get_device(self, device_api_id: int) -> RingGeneric:
         """Get device by api id."""
