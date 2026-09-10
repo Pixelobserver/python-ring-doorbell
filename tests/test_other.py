@@ -2,6 +2,10 @@
 
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+from ring_doorbell.const import SNAPSHOT_ENDPOINT, SNAPSHOT_TIMESTAMP_ENDPOINT
+from ring_doorbell.exceptions import RingError
+
 from .conftest import json_request_kwargs, nojson_request_kwargs
 
 
@@ -179,6 +183,25 @@ async def test_intercom_video_webrtc_lifecycle(ring, mocker):
     assert "session" not in dev._webrtc_streams
 
 
+async def test_intercom_stream_close_callback_removes_session(ring, mocker):
+    """A remotely closed stream is removed and cannot receive more candidates."""
+    dev = ring.devices()["other"][0]
+    stream = MagicMock(generate=AsyncMock(), close=AsyncMock())
+    stream_type = mocker.patch(
+        "ring_doorbell.other.RingWebRtcStream", return_value=stream
+    )
+    await dev.generate_async_webrtc_stream("offer", "session", AsyncMock())
+
+    await stream_type.call_args.kwargs["on_close_callback"]()
+
+    assert "session" not in dev._webrtc_streams
+    stream.close.assert_awaited_once_with()
+    await dev.close_webrtc_stream("session")
+    stream.close.assert_awaited_once_with()
+    with pytest.raises(RingError, match="before stream has been created"):
+        await dev.on_webrtc_candidate("session", "candidate", 1)
+
+
 async def test_intercom_video_webrtc_sync_close(ring, mocker):
     """Test synchronously closing a video intercom WebRTC stream."""
     dev = ring.devices()["other"][0]
@@ -207,3 +230,52 @@ async def test_intercom_snapshot_handles_empty_timestamps(ring, mocker):
 
     assert await dev.async_get_snapshot(retries=2, delay=0) is None
     assert query.await_count == 3
+
+
+@pytest.mark.parametrize("save_to_file", [False, True], ids=["bytes", "file"])
+async def test_intercom_snapshot_downloads_only_fresh_image(
+    ring, mocker, tmp_path, save_to_file
+):
+    """Ignore stale timestamps and return or save the freshly downloaded image."""
+    dev = ring.devices()["other"][0]
+    dev._attrs["kind"] = "intercom_handset_video"
+    mocker.patch("ring_doorbell.other.time.time", return_value=100)
+    sleep = mocker.patch("ring_doorbell.other.asyncio.sleep", new=AsyncMock())
+    snapshot = b"fresh intercom snapshot"
+    query = mocker.patch.object(
+        dev._ring,
+        "async_query",
+        new=AsyncMock(
+            side_effect=[
+                MagicMock(),
+                MagicMock(json=MagicMock(return_value={"timestamps": []})),
+                MagicMock(json=MagicMock(return_value={"timestamps": [{}]})),
+                MagicMock(
+                    json=MagicMock(return_value={"timestamps": [{"timestamp": 100000}]})
+                ),
+                MagicMock(
+                    json=MagicMock(return_value={"timestamps": [{"timestamp": 101000}]})
+                ),
+                MagicMock(content=snapshot),
+            ]
+        ),
+    )
+    filename = tmp_path / "snapshot.jpg"
+
+    result = await dev.async_get_snapshot(
+        retries=4, delay=1, filename=str(filename) if save_to_file else None
+    )
+
+    assert result == (None if save_to_file else snapshot)
+    assert filename.exists() is save_to_file
+    if save_to_file:
+        assert filename.read_bytes() == snapshot
+    timestamp_call = mocker.call(
+        SNAPSHOT_TIMESTAMP_ENDPOINT,
+        method="POST",
+        json={"doorbot_ids": [dev.id]},
+    )
+    assert query.await_args_list == [timestamp_call] * 5 + [
+        mocker.call(SNAPSHOT_ENDPOINT.format(dev.id))
+    ]
+    assert sleep.await_args_list == [mocker.call(1)] * 4
